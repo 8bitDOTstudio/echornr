@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>🌀 Echo Runner</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #111;
+      font-family: sans-serif;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      position: relative;
+    }
+    canvas {
+      display: block;
+      background: linear-gradient(to top, #000, #222);
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    #ui {
+      position: absolute;
+      top: 15px;
+      left: 15px;
+      color: white;
+      z-index: 10;
+      font-size: 18px;
+      font-weight: bold;
+    }
+    #gameOverScreen {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: white;
+      z-index: 10;
+      display: none;
+      background: rgba(0,0,0,0.9);
+      padding: 30px;
+      border-radius: 12px;
+      max-width: 90%;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      margin-top: 15px;
+      cursor: pointer;
+      background-color: #2a9d8f;
+      color: white;
+      border: none;
+      border-radius: 8px;
+    }
+    .hint {
+      position: absolute;
+      bottom: 30px;
+      font-size: 16px;
+      opacity: 0.4;
+      padding: 8px 16px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.1);
+    }
+    #leftHint { left: 10%; }
+    #rightHint { right: 10%; }
+
+    /* Hide hints on desktop */
+    @media (min-width: 768px) {
+      .hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="ui">Score: <span id="score">0</span></div>
+<div class="hint" id="leftHint">Tap Left</div>
+<div class="hint" id="rightHint">Tap Right</div>
+
+<div id="gameOverScreen">
+  <h2>💀 Echo Collision!</h2>
+  <p>Your Score: <strong id="finalScore">0</strong></p>
+  <button onclick="startGame()">🔁 Run Again</button>
+</div>
+
+<!-- Telegram SDK -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  let player, obstacles = [], ghosts = [], score = 0, gameOver = false;
+
+  // Get Telegram user ID
+  let userId = null;
+  if (window.Telegram && Telegram.WebApp && Telegram.WebApp.initDataUnsafe?.user) {
+    userId = Telegram.WebApp.initDataUnsafe.user.id;
+  } else {
+    alert("This app must be opened inside Telegram.");
+  }
+
+  function loadGhostsFromCloud() {
+    Telegram.WebApp.CloudStorage.getItem(`echo_ghost_${userId}`, (err, data) => {
+      if (!err && data) {
+        try {
+          ghosts = JSON.parse(data);
+        } catch (e) {
+          ghosts = [];
+        }
+      } else {
+        ghosts = [];
+      }
+    });
+  }
+
+  function saveGhostToCloud(x, y) {
+    ghosts.push({ x, y });
+    Telegram.WebApp.CloudStorage.setItem(`echo_ghost_${userId}`, JSON.stringify(ghosts), () => {});
+  }
+
+  function startGame() {
+    document.getElementById('gameOverScreen').style.display = 'none';
+    player = {
+      x: canvas.width / 2,
+      y: canvas.height - 100,
+      width: 30,
+      height: 30,
+      speed: 5
+    };
+
+    obstacles = [];
+    score = 0;
+    gameOver = false;
+
+    loop();
+  }
+
+  function spawnObstacle() {
+    const x = Math.random() * canvas.width;
+    obstacles.push({
+      x,
+      y: -50,
+      width: 30,
+      height: 30
+    });
+  }
+
+  function drawPlayer() {
+    ctx.fillStyle = "#00ffff";
+    ctx.fillRect(player.x, player.y, player.width, player.height);
+  }
+
+  function drawObstacles() {
+    ctx.fillStyle = "#ff4444";
+    obstacles.forEach((obs) => {
+      obs.y += player.speed + 2;
+      ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+    });
+  }
+
+  function drawGhosts() {
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ghosts.forEach((g) => {
+      ctx.fillRect(g.x, g.y, 30, 30);
+    });
+  }
+
+  function checkCollision() {
+    obstacles.forEach((obs) => {
+      if (
+        player.x < obs.x + obs.width &&
+        player.x + player.width > obs.x &&
+        player.y < obs.y + obs.height &&
+        player.y + player.height > obs.y
+      ) {
+        endGame();
+      }
+    });
+
+    ghosts.forEach((g) => {
+      if (
+        player.x < g.x + 30 &&
+        player.x + player.width > g.x &&
+        player.y < g.y + 30 &&
+        player.y + player.height > g.y
+      ) {
+        endGame();
+      }
+    });
+  }
+
+  function loop() {
+    if (gameOver) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    drawGhosts();
+    drawObstacles();
+    drawPlayer();
+
+    if (Math.random() < 0.03) spawnObstacle();
+
+    player.y -= player.speed;
+    if (player.y < 0) {
+      score++;
+      player.y = canvas.height - 100;
+    }
+
+    checkCollision();
+
+    document.getElementById("score").textContent = score;
+
+    requestAnimationFrame(loop);
+  }
+
+  function endGame() {
+    gameOver = true;
+    saveGhostToCloud(Math.floor(player.x), Math.floor(player.y));
+    document.getElementById("finalScore").textContent = score;
+    document.getElementById("gameOverScreen").style.display = "block";
+  }
+
+  // Desktop keyboard controls
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft" || e.key === "a") {
+      player.x -= player.speed * 5;
+    }
+    if (e.key === "ArrowRight" || e.key === "d") {
+      player.x += player.speed * 5;
+    }
+  });
+
+  // Mobile touch controls (tap zones)
+  canvas.addEventListener("pointerdown", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+
+    if (x < canvas.width / 2) {
+      player.x -= player.speed * 5;
+    } else {
+      player.x += player.speed * 5;
+    }
+  });
+
+  // Load saved ghosts from Telegram CloudStorage
+  loadGhostsFromCloud();
+
+  // Start automatically
+  startGame();
+</script>
+</body>
+</html>
